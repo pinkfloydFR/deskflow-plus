@@ -179,6 +179,8 @@ private:
   Updater m_updater{this};
   bool m_secureSocket = false;
   bool m_saveOnExit = true;
+  // Quit was chosen from a menu, rather than the window being closed by signing out or an update
+  bool m_quitRequested = false;
   bool m_clientErrorVisible = false;
   ServerConfig m_serverConfig;
   // clients the server's connection to is slow, and how many milliseconds a round trip takes

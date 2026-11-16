@@ -266,8 +266,13 @@ void MainWindow::connectSlots()
   connect(m_actionSaveLogs, &QAction::triggered, this, &MainWindow::saveLogs);
   connect(m_actionMinimize, &QAction::triggered, this, &MainWindow::hide);
 
-  connect(m_actionQuit, &QAction::triggered, this, &MainWindow::close);
-  connect(m_actionTrayQuit, &QAction::triggered, this, &MainWindow::close);
+  // quitting from the menu means it: the mouse and keyboard stop being shared too
+  const auto quit = [this] {
+    m_quitRequested = true;
+    close();
+  };
+  connect(m_actionQuit, &QAction::triggered, this, quit);
+  connect(m_actionTrayQuit, &QAction::triggered, this, quit);
   connect(m_actionRestore, &QAction::triggered, this, &MainWindow::showAndActivate);
   connect(m_actionSettings, &QAction::triggered, this, &MainWindow::openSettings);
   connect(m_actionStartCore, &QAction::triggered, this, &MainWindow::startCore);
@@ -1051,6 +1056,13 @@ void MainWindow::closeEvent(QCloseEvent *event)
     Settings::setValue(Settings::Gui::AutoStartCore, m_coreProcess.isStarted());
   }
   qDebug() << "quitting application";
+
+  // the background service would otherwise carry on sharing with nothing on screen to show it. signing out,
+  // shutting down and updating also close the window, and those leave the core to the service, so it's
+  // there at the sign-in screen. after the setting above, so opening the app again starts the core again
+  const bool closedByUser = m_quitRequested || (event->spontaneous() && !qApp->isSavingSession());
+  if (closedByUser)
+    m_coreProcess.pauseForQuit();
 
   // any connected dock view acitons will be triggered
   // disconnect them before accepting the event
