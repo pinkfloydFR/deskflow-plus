@@ -338,6 +338,26 @@ void MainWindow::connectSlots()
   connect(ui->lineEditName, &QLineEdit::editingFinished, this, &MainWindow::setHostName);
 
   connect(m_networkMonitor, &NetworkMonitor::ipAddressesChanged, this, &MainWindow::updateIpLabel);
+
+  // this computer's monitors are read when the settings load, which at sign-in can be before they are all up,
+  // and they can be plugged in, switched off or rearranged at any time after
+  m_monitorsTimer = new QTimer(this);
+  m_monitorsTimer->setSingleShot(true);
+  m_monitorsTimer->setInterval(1000);
+  connect(m_monitorsTimer, &QTimer::timeout, this, &MainWindow::refreshLocalMonitors);
+  const auto watchScreen = [this](const QScreen *screen) {
+    connect(screen, &QScreen::geometryChanged, m_monitorsTimer, qOverload<>(&QTimer::start));
+  };
+  for (const auto *screen : QGuiApplication::screens())
+    watchScreen(screen);
+  connect(qApp, &QGuiApplication::screenAdded, this, [this, watchScreen](const QScreen *screen) {
+    watchScreen(screen);
+    m_monitorsTimer->start();
+  });
+  connect(qApp, &QGuiApplication::screenRemoved, m_monitorsTimer, qOverload<>(&QTimer::start));
+  connect(qApp, &QGuiApplication::primaryScreenChanged, m_monitorsTimer, qOverload<>(&QTimer::start));
+  // and once shortly after starting, for a monitor that woke without the app being told
+  QTimer::singleShot(10000, this, &MainWindow::refreshLocalMonitors);
 }
 
 void MainWindow::toggleLogVisible(bool visible)
@@ -729,6 +749,7 @@ void MainWindow::updateNetworkInfo()
 
 void MainWindow::serverConnectionConfigureClient(const QString &clientName)
 {
+  refreshLocalMonitors();
   m_serverConfigDialogVisible = true;
   ServerConfigDialog dialog(this, m_serverConfig);
   if (dialog.addClient(clientName) && dialog.exec() == QDialog::Accepted) {
@@ -1205,6 +1226,10 @@ void MainWindow::updateText()
 
 void MainWindow::showConfigureServer(const QString &message)
 {
+  // show the monitors as they are now
+  refreshLocalMonitors();
+
+  m_serverConfigDialogVisible = true;
   ServerConfigDialog dialog(this, serverConfig());
   dialog.message(message);
   if (dialog.exec() == QDialog::Accepted) {
@@ -1212,6 +1237,7 @@ void MainWindow::showConfigureServer(const QString &message)
     if (m_coreProcess.isStarted())
       m_coreProcess.restart();
   }
+  m_serverConfigDialogVisible = false;
 }
 
 void MainWindow::showFileTransferStatus(
@@ -1257,8 +1283,21 @@ void MainWindow::applyReportedShapes()
   bool changed = false;
   for (auto shape = m_reportedShapes.cbegin(); shape != m_reportedShapes.cend(); ++shape)
     changed |= m_serverConfig.updateComputerMonitors(shape.key(), shape.value());
+  // likewise this computer's own
+  changed |= m_serverConfig.updateLocalMonitors();
   if (changed)
     m_serverConfig.commit();
+}
+
+void MainWindow::refreshLocalMonitors()
+{
+  // an open dialog is editing a copy of the layout, saving it re-applies the monitors
+  if (m_serverConfigDialogVisible || !m_serverConfig.updateLocalMonitors())
+    return;
+
+  m_serverConfig.commit();
+  // the layout may now link differently, so the running server picks it up straight away
+  m_coreProcess.reloadServerConfig();
 }
 
 void MainWindow::showConfigureClient()
